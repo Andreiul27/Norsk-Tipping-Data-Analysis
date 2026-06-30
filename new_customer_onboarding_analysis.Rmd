@@ -1,0 +1,559 @@
+---
+title: "New Customer Onboarding – Insights from the First Week"
+author: "Andrei"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+Sys.setlocale("LC_ALL", "nb_NO.UTF-8")  # keep Norwegian locale so special characters / number formats in the source file parse correctly
+```
+
+# Load required packages
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(skimr)
+library(readr)
+library(ggplot2)
+library(purrr)
+library(knitr)
+library(kableExtra)
+options(scipen = 999)
+```
+
+# Import the dataset and inspect variable names, data types and structure
+
+```{r import-data, message=FALSE, warning=FALSE}
+data_raw <- read_excel(
+  "First_week_anonymous.xlsx",
+  na = c("", "NA")
+)
+
+# Translate the original Norwegian column-name patterns to English for readability.
+# Source columns follow the pattern PLAYDAY_<1-7>_<GAME TYPE>_<TURNOVER|LOSS>.
+data_raw <- data_raw %>%
+  rename_with(~ .x %>%
+    str_replace_all("ALDER", "AGE") %>%
+    str_replace_all("SPILLDAG", "PLAYDAY") %>%
+    str_replace_all("OMSETNING", "TURNOVER") %>%
+    str_replace_all("TAP", "LOSS") %>%
+    str_replace_all("KASINO", "CASINO") %>%
+    str_replace_all("SPORT", "SPORTS") %>%
+    str_replace_all("LOTTERI", "LOTTERY") %>%
+    str_replace_all("ØYEBLIKKSPILL", "INSTANT_GAMES")
+  )
+
+data <- data_raw %>%
+  mutate(
+    across(
+      4:59,
+      ~ {
+        x <- as.character(.)
+        x <- str_replace_all(x, "[−–—]", "-")  # normalize Unicode minus signs
+        round(
+          parse_number(
+            x,
+            locale = locale(decimal_mark = ".", grouping_mark = ",")
+          ),
+          0
+        )
+      }
+    )
+  )
+# All variables were first converted to text, then parsed as numbers using locale-aware
+# parsing to ensure consistency. After numeric parsing, monetary variables were rounded
+# to whole numbers to remove unnecessary decimal precision.
+
+glimpse(data) # check
+skim(data)    # check
+
+vars_na <- c(
+  "PLAYDAY_4_SPORTS_LOSS",
+  "PLAYDAY_6_SPORTS_LOSS",
+  "PLAYDAY_5_INSTANT_GAMES_LOSS"
+)
+
+data_clean <- data %>%
+  filter(if_all(all_of(vars_na), ~ !is.na(.)))
+
+# Rows with missing values in selected day- and game-specific variables were removed
+# from the analysis dataset.
+skim(data_clean) # final data check
+```
+
+# Transform raw daily variables into behavioral features / create variables suitable for EDA, risk assessment and segmentation
+
+```{r}
+# Covers day 1 to 7, i.e. the customer's first week.
+# Automatically identifies all variables related to:
+# - Turnover (stake)
+# - Loss / win from the customer's perspective
+
+playdays <- 1:7 # all 7 days
+turnover_vars <- grep("TURNOVER", names(data_clean), value = TRUE)  # stake
+loss_vars     <- grep("LOSS", names(data_clean), value = TRUE)      # net loss (customer perspective)
+
+# Total turnover and total loss
+data_feat <- data_clean %>%
+  mutate(
+    total_turnover = rowSums(select(., all_of(turnover_vars))),
+    total_loss      = rowSums(select(., all_of(loss_vars)))
+  )
+
+# Sums all stakes across days and game types into total turnover per customer.
+# Sums all daily losses/wins into total net loss or win per customer.
+# Lifts the data from day-level to customer-level, which is necessary for segmentation.
+
+# Aggregate by game type, e.g. Casino, Sports, Lottery, Instant games
+
+data_feat <- data_feat %>%
+  mutate(
+    casino_turnover  = rowSums(select(., contains("CASINO_TURNOVER"))),
+    sports_turnover  = rowSums(select(., contains("SPORTS_TURNOVER"))),
+    lottery_turnover = rowSums(select(., contains("LOTTERY_TURNOVER"))),
+    instant_turnover = rowSums(select(., contains("INSTANT_GAMES_TURNOVER")))
+  )
+
+# Splits total turnover by game type.
+# Gives insight into what the customer plays, not just how much.
+
+# Create behavioral shares (key for segmentation)
+data_feat <- data_feat %>%
+  mutate(
+    casino_share  = casino_turnover / total_turnover,
+    sports_share  = sports_turnover / total_turnover,
+    lottery_share = lottery_turnover / total_turnover,
+    instant_share = instant_turnover / total_turnover
+  )
+
+# Converts absolute amounts into shares of total stake.
+# A customer can have low turnover but still a high casino share.
+# Shares make it possible to compare customers with different spending levels fairly.
+
+# Active days (any stake > 0)
+data_feat <- data_feat %>%
+  mutate(
+    active_days = rowSums(
+      select(., all_of(turnover_vars)) > 0
+    )
+  )
+
+# Counts how many of the 7 days the customer had at least one stake.
+# Measures play frequency and engagement, independent of amount and game type.
+
+# Early risk indicators (case-relevant)
+data_feat <- data_feat %>%
+  mutate(
+    high_turnover      = total_turnover > quantile(total_turnover, 0.90),
+    high_casino_share   = casino_share > 0.5,
+    young_male          = (AGE <= 25 & GENDER == "M")
+  )
+
+# Identifies customers with:
+# - Very high turnover (top 10%)
+# - High casino share
+# - Young male, a known risk group
+```
+
+# Exploratory data analysis
+
+```{r}
+
+# Age distribution
+summary(data_feat$AGE) # youngest customer 19 years - oldest 99 - average age ~34
+
+# Gender distribution
+table(data_feat$GENDER)        # 212,374 M and 152,772 F
+prop.table(table(data_feat$GENDER)) # 58% M and 42% F
+
+# Game type preferences
+summary(data_feat$casino_share)
+summary(data_feat$sports_share)
+summary(data_feat$lottery_share)
+summary(data_feat$instant_share)
+
+# A large share of customers do not play casino, sports, or instant games in the first week.
+# Customers who play lottery often play only lottery, giving them a very high lottery share.
+# This pulls the average lottery share strongly upward.
+# Lottery has the highest average turnover share.
+
+# Visualization
+## Distribution of total turnover (log scale)
+mean_turnover   <- mean(data_feat$total_turnover)
+median_turnover <- median(data_feat$total_turnover)
+# Black dashed line → mean
+# Yellow line → median
+ggplot(data_feat, aes(total_turnover)) +
+  geom_histogram(
+    bins = 50,
+    fill = "#C8102E",
+    alpha = 0.7
+  ) +
+  scale_x_log10(
+    breaks = c(10, 50, 100, 500, 1000, 10000, 100000),
+    labels = scales::comma
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 60000, by = 10000),
+    labels = scales::comma
+  ) +
+  geom_vline(
+    xintercept = median_turnover,
+    color = "#FFFF00",
+    size = 1.1
+  ) +
+  geom_vline(
+    xintercept = mean_turnover,
+    color = "black",
+    linetype = "dashed",
+    size = 1
+  ) +
+  labs(
+    title = "Distribution of total turnover (log scale)",
+    x = "Total turnover (log)",
+    y = "Number of customers"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+# The figure shows the distribution of total turnover per customer in the first week.
+# The x-axis uses a log scale to make large differences in spending readable.
+# Most customers have low turnover, while a small minority have very high turnover.
+#
+# The log scale makes it possible to see the full distribution.
+# 50% of customers have lower turnover than the median.
+# The mean is strongly affected by customers with high turnover and sits clearly to
+# the right of the median — a classic sign of a right-skewed distribution with a few
+# customers spending much more than the rest.
+
+data_long <- data_feat %>%
+  select(ROW_NUM, casino_share, sports_share, lottery_share, instant_share) %>%
+  pivot_longer(
+    cols = -ROW_NUM,
+    names_to = "game_type",
+    values_to = "share"
+  )
+
+data_feat <- data_feat %>%
+  mutate(
+    age_group = case_when(
+      AGE <= 35 ~ "19–35 years",
+      TRUE      ~ "36+ years"
+    )
+  )
+
+# Game type dominance – violin plot only
+ggplot(data_long, aes(x = game_type, y = share, fill = game_type)) +
+  geom_violin(
+    trim = FALSE,
+    alpha = 0.8
+  ) +
+  scale_fill_manual(
+    values = c(
+      casino_share  = "#C8102E",  # red
+      lottery_share = "#2E8B57",  # green
+      instant_share = "#F2C300",  # yellow
+      sports_share  = "#1F77B4"   # blue
+    ),
+    labels = c(
+      casino_share  = "Casino",
+      lottery_share = "Lottery",
+      instant_share = "Instant games",
+      sports_share  = "Sports"
+    )
+  ) +
+  labs(
+    title = "Share of total turnover by game type",
+    x = "Game type",
+    y = "Share of total turnover"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "none"
+  )
+
+# Lottery: broad usage, often a dominant share, low risk
+# Sports: mid position, moderate intensity, event-driven
+# Instant games: short, intense sessions
+# Casino: played by few, high intensity when played, higher risk
+#
+# Casino and instant games show concentrated usage — at least 75% of customers do not
+# play these game types in the first week. The violin plot confirms this: the majority
+# of customers have a zero share for these game types.
+
+# Scatter plot: Age × Lottery share
+ggplot(data_feat, aes(AGE, lottery_share, color = age_group)) +
+  geom_jitter(
+    alpha = 0.3,
+    size = 1.6,
+    width = 0.5,
+    height = 0
+  ) +
+  scale_color_manual(
+    values = c(
+      "19–35 years" = "#1F77B4",
+      "36+ years"   = "#2E8B57"
+    )
+  ) +
+  labs(
+    title = "Lottery share by age",
+    x = "Age",
+    y = "Share of total turnover spent on lottery",
+    color = "Age"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+# Both the 19–35 and 36+ age groups show many customers near a share of 1 (lottery only)
+# and many near 0 (little or no lottery), with no clear age gradient. Lottery is a
+# broadly used product regardless of age, and appears as a low-risk product in the
+# onboarding phase.
+
+# Age × Sports share
+ggplot(data_feat, aes(AGE, sports_share, color = age_group)) +
+  geom_jitter(alpha = 0.15, width = 0.5, height = 0) +
+  scale_color_manual(
+    values = c(
+      "19–35 years" = "#C8102E",  # red
+      "36+ years"   = "#7F7F7F"   # gray
+    )
+  ) +
+  labs(
+    title = "Sports share by age",
+    x = "Age",
+    y = "Share of total turnover spent on sports",
+    color = "Age"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+
+# Sports betting is more concentrated among customers aged 19–35, with significant
+# overlap between age groups but a center of gravity skewed toward younger customers.
+# Sports betting shows a moderate risk profile, with somewhat higher concentration
+# among younger customers.
+
+data_feat <- data_feat %>%
+  mutate(
+    young_male_19_25 = case_when(
+      GENDER == "M" & AGE >= 19 & AGE <= 25 ~ "Young men (19–25)",
+      GENDER == "M"                          ~ "Men 26+",
+      TRUE                                   ~ "Women"
+    )
+  )
+
+# Young men (19–25) → highest known risk
+# Men 26+ → elevated risk
+# Women → lower risk on average
+
+ggplot(data_feat, aes(
+    x = factor(
+      young_male_19_25,
+      levels = c("Young men (19–25)", "Men 26+", "Women")
+    ),
+    y = casino_share,
+    fill = young_male_19_25
+  )
+) +
+  geom_violin(trim = FALSE, alpha = 0.8) +
+  scale_fill_manual(
+    values = c(
+      "Young men (19–25)" = "#C8102E",
+      "Men 26+"            = "#1F77B4",
+      "Women"              = "#FFD700"
+    )
+  ) +
+  labs(
+    title = "Casino share by gender and age",
+    x = "",
+    y = "Share of total turnover spent on casino"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "none"
+  )
+
+# Casino behavior is strongly concentrated among young men aged 19–25. Women and
+# older men play casino to a very limited extent in the first week, while young men
+# show both a higher share and greater variation in casino exposure.
+```
+
+# Customer segmentation (k-means) – prepare data for clustering
+
+```{r}
+data_feat <- data_feat %>%
+  mutate(
+    casino_share = ifelse(is.na(casino_share), 0, casino_share),
+    sports_share = ifelse(is.na(sports_share), 0, sports_share)
+  )
+
+# Some customers had zero turnover in the first week, which produces missing shares
+# when calculating game shares. For segmentation, these were treated as a zero share,
+# since the customer has no exposure to that game type.
+
+# Standardize variables (critical for k-means)
+cluster_data <- data_feat %>%
+  select(
+    AGE,
+    total_turnover,
+    active_days,
+    casino_share,
+    sports_share
+  ) %>%
+  mutate(
+    total_turnover = log1p(total_turnover)
+  ) %>%
+  scale()
+
+colSums(is.na(cluster_data))  # 1,008 customers had no activity at all in the first
+                               # week BEFORE this step; now 0 after the NA handling above
+
+# Choose number of clusters (elbow method)
+set.seed(123)
+
+wss <- map_dbl(2:8, function(k) {
+  kmeans(cluster_data, centers = k, nstart = 20)$tot.withinss
+})
+
+plot(
+  2:8, wss, type = "b",
+  xlab = "Number of clusters",
+  ylab = "Within-cluster sum of squares",
+  main = "Elbow method"
+)
+
+# Run k-means
+set.seed(123)
+
+k4 <- kmeans(cluster_data, centers = 4, nstart = 50)
+
+data_seg <- data_feat %>%
+  mutate(segment = factor(k4$cluster))
+
+# Profile the segments
+segment_profile <- data_seg %>%
+  group_by(segment) %>%
+  summarise(
+    n_customers        = n(),
+    mean_age           = mean(AGE),
+    mean_turnover      = mean(total_turnover),
+    mean_active_days   = mean(active_days),
+    mean_casino_share  = mean(casino_share),
+    share_male         = mean(GENDER == "M")
+  )
+
+segment_profile
+
+segment_table <- data_seg %>%
+  group_by(segment) %>%
+  summarise(
+    N_customers       = n(),
+    Mean_age          = mean(AGE),
+    Mean_turnover     = mean(total_turnover),
+    Mean_active_days  = mean(active_days),
+    Mean_casino_share = mean(casino_share),
+    Share_male        = mean(GENDER == "M")
+  ) %>%
+  mutate(
+    # Round for readability
+    Mean_age          = round(Mean_age, 1),
+    Mean_turnover     = round(Mean_turnover, 0),
+    Mean_active_days  = round(Mean_active_days, 1),
+    Mean_casino_share = round(Mean_casino_share, 3),
+    Share_male        = round(Share_male, 2),
+
+    # Segment labels
+    Segment_name = case_when(
+      segment == 1 ~ "Mature low-intensity players",
+      segment == 2 ~ "Young engaged men",
+      segment == 3 ~ "Young exploring customers",
+      segment == 4 ~ "Young high-intensity casino players"
+    ),
+
+    # Risk level
+    Risk = case_when(
+      segment == 1 ~ "Low",
+      segment == 2 ~ "Moderate",
+      segment == 3 ~ "Low",
+      segment == 4 ~ "High"
+    )
+  ) %>%
+  rename(
+    Segment = segment
+  ) %>%
+  select(
+    Segment,
+    Segment_name,
+    Risk,
+    N_customers,
+    Mean_age,
+    Mean_turnover,
+    Mean_active_days,
+    Mean_casino_share,
+    Share_male
+  )
+
+# Table 1 shows four distinct customer segments with large differences in age,
+# activity level, and risk profile.
+
+segment_table_final <- segment_table %>%
+  rename(
+    Segment          = Segment,
+    Segment_name     = Segment_name,
+    Risk             = Risk,
+    N_customers      = N_customers,
+    Avg_age          = Mean_age,
+    Avg_turnover     = Mean_turnover,
+    Avg_active_days  = Mean_active_days,
+    Avg_casino_share = Mean_casino_share,
+    Share_male       = Share_male
+  )
+```
+
+```{r}
+
+# Run PCA
+pca <- prcomp(cluster_data, center = TRUE, scale. = TRUE)
+
+# Add PCA coordinates and segment labels to the data
+pca_df <- data_seg %>%
+  mutate(
+    PC1 = pca$x[,1],
+    PC2 = pca$x[,2],
+    Segment_name = case_when(
+      segment == 1 ~ "Mature low-intensity players",
+      segment == 2 ~ "Young engaged men",
+      segment == 3 ~ "Young exploring customers",
+      segment == 4 ~ "Young high-intensity casino players"
+    )
+  )
+
+ggplot(pca_df, aes(PC1, PC2, color = Segment_name)) +
+  geom_point(alpha = 0.4, size = 1.2) +
+  labs(
+    title = "Customer segments based on first-week play behavior",
+    x = "Behavioral dimension 1 (PCA)",
+    y = "Behavioral dimension 2 (PCA)",
+    color = "Segment"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  )
+```
