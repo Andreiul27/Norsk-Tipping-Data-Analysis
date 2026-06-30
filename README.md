@@ -7,7 +7,7 @@ An R Markdown analysis built for a Data Analyst case study (Norsk Tipping), expl
 
 ## Case background
 
-> **Case:** Give new customers a good onboarding — a relevant, entertaining customer experience within safe limits.
+> **Case:** Give new customers a good onboarding and  a relevant, entertaining customer experience within safe limits.
 >
 > The dataset covers new customers in the first week after placing their first digital bet. Norsk Tipping wants to quickly understand customers' interests, needs, and any early signs of risky play, so it can follow up promptly and provide a good onboarding experience, relevant and entertaining content, and safe play limits (problem gambling prevention).
 >
@@ -18,7 +18,7 @@ An R Markdown analysis built for a Data Analyst case study (Norsk Tipping), expl
 Anonymized data for new customers over their first 7 days of play, including:
 - Row number, gender, age
 - Turnover (stake) per play day (1–7), split by casino, sports, lottery, and instant games
-- GGR (Gross Gaming Revenue — Norsk Tipping's net revenue after prizes) per play day, split by the same game types. From the customer's perspective, a negative amount means a net win (prizes exceed stakes); a positive amount means a net loss (stakes exceed prizes).
+- GGR (Gross Gaming Revenue:  Norsk Tipping's net revenue after prizes) per play day, split by the same game types. From the customer's perspective, a negative amount means a net win (prizes exceed stakes); a positive amount means a net loss (stakes exceed prizes).
 
 ### Known risk factors (used to guide feature engineering)
 
