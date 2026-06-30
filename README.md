@@ -9,7 +9,7 @@ An R Markdown analysis built for a Data Analyst case study (Norsk Tipping), expl
 
 > **Case:** Give new customers a good onboarding — a relevant, entertaining customer experience within safe limits.
 >
-> The dataset covers new customers in the first week after placing their first digital bet. Norsk Tipping wants to quickly understand customers' interests, needs, and any early signs of risky play behavior, so it can follow up early and provide: a good onboarding experience, relevant and entertaining content, and safe play limits (problem gambling prevention).
+> The dataset covers new customers in the first week after placing their first digital bet. Norsk Tipping wants to quickly understand customers' interests, needs, and any early signs of risky play, so it can follow up promptly and provide a good onboarding experience, relevant and entertaining content, and safe play limits (problem gambling prevention).
 >
 > The task: use the dataset to find insight about customers, e.g., identify segments of customers with similar needs, and assess how each segment could be followed up, for example, through tailored CRM communication, personalized in-app content, or other channels.
 
