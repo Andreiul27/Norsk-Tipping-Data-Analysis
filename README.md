@@ -1,7 +1,7 @@
 # Norsk-Tipping-Data-Analysis
 R Markdown analysis for a Data Analyst case study (Norsk Tipping): first-week onboarding behavior of new customers. Covers feature engineering, EDA, k-means segmentation, and PCA to identify customer segments and early risk indicators for responsible gambling follow-up.
 
-# New Customer Onboarding – First-Week Insights (Norsk Tipping Case Study)
+# New Customer Onboarding First-Week Insights (Norsk Tipping Case Study)
 
 An R Markdown analysis built for a Data Analyst case study (Norsk Tipping), exploring new customers' behavior in their first week of digital play (app/web) to support early, responsible onboarding.
 
@@ -11,7 +11,7 @@ An R Markdown analysis built for a Data Analyst case study (Norsk Tipping), expl
 >
 > The dataset covers new customers in the first week after placing their first digital bet. Norsk Tipping wants to quickly understand customers' interests, needs, and any early signs of risky play behavior, so it can follow up early and provide: a good onboarding experience, relevant and entertaining content, and safe play limits (problem gambling prevention).
 >
-> The task: use the dataset to find insight about customers, e.g. identify segments of customers with similar needs, and assess how each segment could be followed up — for example through tailored CRM communication, personalized in-app content, or other channels.
+> The task: use the dataset to find insight about customers, e.g., identify segments of customers with similar needs, and assess how each segment could be followed up, for example, through tailored CRM communication, personalized in-app content, or other channels.
 
 ### Dataset
 
@@ -24,11 +24,11 @@ Anonymized data for new customers over their first 7 days of play, including:
 
 - Younger men (18–25) have a higher risk of developing gambling problems
 - Men generally have a higher risk than women
-- Lottery has low risk of gambling problems
+- Lottery has a low risk of gambling problems
 - Sports betting and instant games carry moderate risk
 - Casino games carry high risk
 - High spending and high play frequency are associated with gambling problems
-- Young men who play casino and sports also often play with multiple operators (including foreign operators)
+- Young men who play in casinos and sports also often play with multiple operators (including foreign operators)
 
 ## What the analysis does
 
@@ -49,7 +49,7 @@ install.packages(c(
 
 ## Data input
 
-This repository does **not** include the underlying data file. Place an anonymized first-week export named `First_week_anonymous.xlsx` in the project's working directory before knitting — see the "Known risk factors" section above for the expected variable groups, and the script's column-renaming step for the exact source naming pattern expected (`SPILLDAG_<day>_<KASINO|SPORT|LOTTERI|ØYEBLIKKSPILL>_<OMSETNING|TAP>` in the original export).
+This repository does **not** include the underlying data file. 
 
 ## Notes
 
